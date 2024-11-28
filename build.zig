@@ -4,6 +4,12 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const module = b.addModule("aio", .{
+        .root_source_file = b.path("src/io.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
     const lib = b.addStaticLibrary(.{
         .name = "aio",
         .root_source_file = b.path("src/io.zig"),
@@ -32,6 +38,7 @@ pub fn build(b: *std.Build) void {
         });
 
         exe.root_module.addImport("io", &lib.root_module);
+        exe.root_module.addImport("aio", module);
 
         b.installArtifact(exe);
         const run_cmd = b.addRunArtifact(exe);
