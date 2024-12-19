@@ -1,8 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
-const zinc = @import("../zinc.zig");
-const IO = zinc.IO.IO;
+const IO = @import("../src/io.zig").IO;
 
 const os = std.os;
 const assert = std.debug.assert;
