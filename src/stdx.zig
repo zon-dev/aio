@@ -592,7 +592,7 @@ pub fn has_unique_representation(comptime T: type) bool {
 
         .int => |info| return @sizeOf(T) * 8 == info.bits,
 
-        .pointer => |info| return info.size != .Slice,
+        .pointer => |info| return info.size != .slice,
 
         .array => |info| return comptime has_unique_representation(info.child),
 
