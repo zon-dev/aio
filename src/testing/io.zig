@@ -33,14 +33,14 @@ pub const IO = struct {
 
     files: []const File,
     options: Options,
-    prng: std.rand.DefaultPrng,
+    prng: std.Random.DefaultPrng,
 
     completed: FIFOType(Completion) = .{ .name = "io_completed" },
 
     pub fn init(files: []const File, options: Options) IO {
         return .{
             .options = options,
-            .prng = std.rand.DefaultPrng.init(options.seed),
+            .prng = std.Random.DefaultPrng.init(options.seed),
             .files = files,
         };
     }

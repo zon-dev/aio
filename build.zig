@@ -17,13 +17,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     b.installArtifact(lib);
-    // const lib = b.addStaticLibrary(.{
-    //     .name = "t2",
-    //     .root_source_file = b.path("src/root.zig"),
-    //     .target = target,
-    //     .optimize = optimize,
-    // });
-    // b.installArtifact(lib);
 
     inline for ([_]struct {
         name: []const u8,

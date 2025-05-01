@@ -1,7 +1,7 @@
 const std = @import("std");
 const assert = std.debug.assert;
 
-const constants = @import("./constants.zig");
+// const constants = @import("./constants.zig");
 
 /// An intrusive first in/first out linked list.
 /// The element type T must have a field called "next" of type ?*T

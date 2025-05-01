@@ -1,5 +1,6 @@
 .{
-    .name = "aio",
+    .name = .aio,
+    .fingerprint = 0xdf66d422e46d3277,
     .version = "0.1.0",
     .dependencies = .{},
     .paths = .{
