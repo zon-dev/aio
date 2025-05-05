@@ -125,36 +125,36 @@ test "checksum test vectors" {
     }
 }
 
-// test "checksum simple fuzzing" {
-//     var prng = std.Random.DefaultPrng.init(42);
+test "checksum simple fuzzing" {
+    var prng = std.Random.DefaultPrng.init(42);
 
-//     const msg_min = 1;
-//     const msg_max = 1 * 1024 * 1024;
+    const msg_min = 1;
+    const msg_max = 1 * 1024 * 1024;
 
-//     var msg_buf = try testing.allocator.alloc(u8, msg_max);
-//     defer testing.allocator.free(msg_buf);
+    var msg_buf = try testing.allocator.alloc(u8, msg_max);
+    defer testing.allocator.free(msg_buf);
 
-//     const cipher_buf = try testing.allocator.alloc(u8, msg_max);
-//     defer testing.allocator.free(cipher_buf);
+    const cipher_buf = try testing.allocator.alloc(u8, msg_max);
+    defer testing.allocator.free(cipher_buf);
 
-//     var i: usize = 0;
-//     while (i < 1_000) : (i += 1) {
-//         const msg_len = prng.random().intRangeAtMostBiased(usize, msg_min, msg_max);
-//         const msg = msg_buf[0..msg_len];
-//         prng.fill(msg);
+    var i: usize = 0;
+    while (i < 1_000) : (i += 1) {
+        const msg_len = prng.random().intRangeAtMostBiased(usize, msg_min, msg_max);
+        const msg = msg_buf[0..msg_len];
+        prng.fill(msg);
 
-//         const msg_checksum = checksum(msg);
+        const msg_checksum = checksum(msg);
 
-//         // Sanity check that it's a pure function.
-//         const msg_checksum_again = checksum(msg);
-//         try testing.expectEqual(msg_checksum, msg_checksum_again);
+        // Sanity check that it's a pure function.
+        const msg_checksum_again = checksum(msg);
+        try testing.expectEqual(msg_checksum, msg_checksum_again);
 
-//         // Change the message and make sure the checksum changes.
-//         msg[prng.random().uintLessThan(usize, msg.len)] +%= 1;
-//         const changed_checksum = checksum(msg);
-//         try testing.expect(changed_checksum != msg_checksum);
-//     }
-// }
+        // Change the message and make sure the checksum changes.
+        msg[prng.random().uintLessThan(usize, msg.len)] +%= 1;
+        const changed_checksum = checksum(msg);
+        try testing.expect(changed_checksum != msg_checksum);
+    }
+}
 
 // Change detector test to ensure we don't inadvertency modify our checksum function.
 test "checksum stability" {
