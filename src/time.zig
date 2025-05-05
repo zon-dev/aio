@@ -1,6 +1,8 @@
 const std = @import("std");
 const builtin = @import("builtin");
 
+const stdx = @import("./stdx.zig");
+
 const os = std.os;
 const posix = std.posix;
 const system = posix.system;
@@ -8,10 +10,9 @@ const assert = std.debug.assert;
 const is_darwin = builtin.target.os.tag.isDarwin();
 const is_windows = builtin.target.os.tag == .windows;
 const is_linux = builtin.target.os.tag == .linux;
+const Instant = stdx.Instant;
 
 pub const Time = struct {
-    const Self = @This();
-
     /// Hardware and/or software bugs can mean that the monotonic clock may regress.
     /// One example (of many): https://bugzilla.redhat.com/show_bug.cgi?id=448449
     /// We crash the process for safety if this ever happens, to protect against infinite loops.
@@ -22,19 +23,22 @@ pub const Time = struct {
     /// Always use a monotonic timestamp if the goal is to measure elapsed time.
     /// This clock is not affected by discontinuous jumps in the system time, for example if the
     /// system administrator manually changes the clock.
-    pub fn monotonic(self: *Self) u64 {
-        // const m = blk: {
-        //     if (is_windows) break :blk monotonic_windows();
-        //     if (is_darwin) break :blk monotonic_darwin();
-        //     if (is_linux) break :blk monotonic_linux();
-        //     @compileError("unsupported OS");
-        // };
-        const m = std.posix.system.mach_continuous_time();
+    pub fn monotonic(self: *Time) u64 {
+        const m = blk: {
+            if (is_windows) break :blk monotonic_windows();
+            if (is_darwin) break :blk monotonic_darwin();
+            if (is_linux) break :blk monotonic_linux();
+            @compileError("unsupported OS");
+        };
 
         // "Oops!...I Did It Again"
         if (m < self.monotonic_guard) @panic("a hardware/kernel bug regressed the monotonic clock");
         self.monotonic_guard = m;
         return m;
+    }
+
+    pub fn monotonic_instant(self: *Time) Instant {
+        return Instant{ .ns = self.monotonic() };
     }
 
     fn monotonic_windows() u64 {
@@ -67,36 +71,24 @@ pub const Time = struct {
 
     fn monotonic_darwin() u64 {
         assert(is_darwin);
+        // Uses mach_continuous_time() instead of mach_absolute_time() as it counts while suspended.
+        //
+        // https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time
+        // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.c.auto.html
+        const darwin = struct {
+            const mach_timebase_info_t = system.mach_timebase_info_data;
+            extern "c" fn mach_timebase_info(info: *mach_timebase_info_t) system.kern_return_t;
+            extern "c" fn mach_continuous_time() u64;
+        };
 
-        // // Uses mach_continuous_time() instead of mach_absolute_time() as it counts while suspended.
-        // //
-        // // https://developer.apple.com/documentation/kernel/1646199-mach_continuous_time
-        // // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.c.auto.html
-        // const darwin = struct {
-        //     // const mach_timebase_info_t = system.mach_timebase_info_data;
-        //     // extern "c" fn mach_timebase_info(info: *mach_timebase_info_t) system.kern_return_t;
-        //     extern "c" fn mach_continuous_time() u64;
-        // };
+        // mach_timebase_info() called through libc already does global caching for us
+        //
+        // https://opensource.apple.com/source/xnu/xnu-7195.81.3/libsyscall/wrappers/mach_timebase_info.c.auto.html
+        var info: darwin.mach_timebase_info_t = undefined;
+        if (darwin.mach_timebase_info(&info) != 0) @panic("mach_timebase_info() failed");
 
-        // // mach_timebase_info() called through libc already does global caching for us
-        // //
-        // // https://opensource.apple.com/source/xnu/xnu-7195.81.3/libsyscall/wrappers/mach_timebase_info.c.auto.html
-        // var info: darwin.mach_timebase_info_t = undefined;
-        // if (darwin.mach_timebase_info(&info) != 0) @panic("mach_timebase_info() failed");
-
-        // // This needs to be called during initialization to avoid being racy.
-        // u64 MonotonicNanoTime() {
-        //   static mach_timebase_info_data_t timebase_info;
-        //   if (timebase_info.denom == 0) mach_timebase_info(&timebase_info);
-        //   return (mach_absolute_time() * timebase_info.numer) / timebase_info.denom;
-        // }
-
-        // const now = std.posix.system.mach_continuous_time();
-        // // var info: system.darwin.mach_timebase_info_data = undefined;
-        // var info = undefined;
-        // if (info.denom == 0) system.mach_timebase_info(&info) catch @panic("mach_timebase_info() failed");
-        // return (now * info.numer) / info.denom;
-        return std.posix.system.mach_continuous_time();
+        const now = darwin.mach_continuous_time();
+        return (now * info.numer) / info.denom;
     }
 
     fn monotonic_linux() u64 {
@@ -116,7 +108,7 @@ pub const Time = struct {
 
     /// A timestamp to measure real (i.e. wall clock) time, meaningful across systems, and reboots.
     /// This clock is affected by discontinuous jumps in the system time.
-    pub fn realtime(_: *Self) i64 {
+    pub fn realtime(_: *Time) i64 {
         if (is_windows) return realtime_windows();
         // macos has supported clock_gettime() since 10.12:
         // https://opensource.apple.com/source/Libc/Libc-1158.1.2/gen/clock_gettime.3.auto.html
@@ -125,15 +117,21 @@ pub const Time = struct {
     }
 
     fn realtime_windows() i64 {
+        // TODO(zig): Maybe use `std.time.nanoTimestamp()`.
+        // https://github.com/ziglang/zig/pull/22871
         assert(is_windows);
-        const kernel32 = struct {
-            extern "kernel32" fn GetSystemTimePreciseAsFileTime(
+        const get_system_time_precise_as_file_time = @extern(
+            *const fn (
                 lpFileTime: *os.windows.FILETIME,
-            ) callconv(os.windows.WINAPI) void;
-        };
+            ) callconv(os.windows.WINAPI) void,
+            .{
+                .library_name = "kernel32",
+                .name = "GetSystemTimePreciseAsFileTime",
+            },
+        );
 
         var ft: os.windows.FILETIME = undefined;
-        kernel32.GetSystemTimePreciseAsFileTime(&ft);
+        get_system_time_precise_as_file_time(&ft);
         const ft64 = (@as(u64, ft.dwHighDateTime) << 32) | ft.dwLowDateTime;
 
         // FileTime is in units of 100 nanoseconds
@@ -149,5 +147,13 @@ pub const Time = struct {
         return @as(i64, ts.tv_sec) * std.time.ns_per_s + ts.tv_nsec;
     }
 
-    pub fn tick(_: *Self) void {}
+    pub fn tick(_: *Time) void {}
 };
+
+test "Time monotonic smoke" {
+    var time: Time = .{};
+    const instant_1 = time.monotonic_instant();
+    const instant_2 = time.monotonic_instant();
+    assert(instant_1.duration_since(instant_1).ns == 0);
+    assert(instant_2.duration_since(instant_1).ns >= 0);
+}

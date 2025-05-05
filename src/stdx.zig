@@ -911,3 +911,37 @@ pub fn unexpected_errno(label: []const u8, err: std.posix.system.E) std.posix.Un
     }
     return error.Unexpected;
 }
+
+pub const Instant = struct {
+    ns: u64,
+
+    pub fn duration_since(now: Instant, earlier: Instant) Duration {
+        assert(now.ns >= earlier.ns);
+        const elapsed_ns = now.ns - earlier.ns;
+        return .{ .ns = elapsed_ns };
+    }
+};
+
+pub const Duration = struct {
+    ns: u64,
+
+    pub fn microseconds(duration: Duration) u64 {
+        return @divFloor(duration.ns, std.time.ns_per_us);
+    }
+
+    pub fn milliseconds(duration: Duration) u64 {
+        return @divFloor(duration.ns, std.time.ns_per_ms);
+    }
+};
+
+test "Instant/Duration" {
+    const instant_1: Instant = .{ .ns = 100 * std.time.ns_per_day };
+    const instant_2: Instant = .{ .ns = 100 * std.time.ns_per_day + std.time.ns_per_s };
+    assert(instant_1.duration_since(instant_1).ns == 0);
+    assert(instant_2.duration_since(instant_1).ns == std.time.ns_per_s);
+
+    const duration = instant_2.duration_since(instant_1);
+    assert(duration.ns == 1_000_000_000);
+    assert(duration.microseconds() == 1_000_000);
+    assert(duration.milliseconds() == 1_000);
+}
