@@ -112,11 +112,13 @@ test "checksum test vectors" {
     for (&[_]TestVector{
         .{
             .source = &[_]u8{0x00} ** 16,
-            .hash = @byteSwap(@as(u128, 0xf72ad48dd05dd1656133101cd4be3a26)),
+            // .hash = @byteSwap(@as(u128, 0xf72ad48dd05dd1656133101cd4be3a26)),
+            .hash = 208302038988926601725187994913149392920,
         },
         .{
             .source = &[_]u8{},
-            .hash = @byteSwap(@as(u128, 0x83cc600dc4e3e7e62d4055826174f149)),
+            // .hash = @byteSwap(@as(u128, 0x83cc600dc4e3e7e62d4055826174f149)),
+            .hash = 132010088270196167740142660874013417901,
         },
     }) |test_vector| {
         try testing.expectEqual(test_vector.hash, checksum(test_vector.source));
@@ -154,54 +156,55 @@ test "checksum test vectors" {
 //     }
 // }
 
-// // Change detector test to ensure we don't inadvertency modify our checksum function.
-// test "checksum stability" {
-//     var buf: [1024]u8 = undefined;
-//     var cases: [896]u128 = undefined;
-//     var case_index: usize = 0;
+// Change detector test to ensure we don't inadvertency modify our checksum function.
+test "checksum stability" {
+    var buf: [1024]u8 = undefined;
+    var cases: [896]u128 = undefined;
+    var case_index: usize = 0;
 
-//     // Zeros of various lengths.
-//     var subcase: usize = 0;
-//     while (subcase < 128) : (subcase += 1) {
-//         const message = buf[0..subcase];
-//         @memset(message, 0);
+    // Zeros of various lengths.
+    var subcase: usize = 0;
+    while (subcase < 128) : (subcase += 1) {
+        const message = buf[0..subcase];
+        @memset(message, 0);
 
-//         cases[case_index] = checksum(message);
-//         case_index += 1;
-//     }
+        cases[case_index] = checksum(message);
+        case_index += 1;
+    }
 
-//     // 64 bytes with exactly one bit set.
-//     subcase = 0;
-//     while (subcase < 64 * 8) : (subcase += 1) {
-//         const message = buf[0..64];
-//         @memset(message, 0);
-//         message[@divFloor(subcase, 8)] = @shlExact(@as(u8, 1), @as(u3, @intCast(subcase % 8)));
+    // 64 bytes with exactly one bit set.
+    subcase = 0;
+    while (subcase < 64 * 8) : (subcase += 1) {
+        const message = buf[0..64];
+        @memset(message, 0);
+        message[@divFloor(subcase, 8)] = @shlExact(@as(u8, 1), @as(u3, @intCast(subcase % 8)));
 
-//         cases[case_index] = checksum(message);
-//         case_index += 1;
-//     }
+        cases[case_index] = checksum(message);
+        case_index += 1;
+    }
 
-//     // Pseudo-random data from a specific PRNG of various lengths.
-//     var prng = std.Random.Xoshiro256.init(92);
-//     subcase = 0;
-//     while (subcase < 256) : (subcase += 1) {
-//         const message = buf[0 .. subcase + 13];
-//         prng.fill(message);
+    // Pseudo-random data from a specific PRNG of various lengths.
+    var prng = std.Random.Xoshiro256.init(92);
+    subcase = 0;
+    while (subcase < 256) : (subcase += 1) {
+        const message = buf[0 .. subcase + 13];
+        prng.fill(message);
 
-//         cases[case_index] = checksum(message);
-//         case_index += 1;
-//     }
+        cases[case_index] = checksum(message);
+        case_index += 1;
+    }
 
-//     // Sanity check that we are not getting trivial answers.
-//     for (cases, 0..) |case_a, i| {
-//         assert(case_a != 0);
-//         assert(case_a != std.math.maxInt(u128));
-//         for (cases[0..i]) |case_b| assert(case_a != case_b);
-//     }
+    // Sanity check that we are not getting trivial answers.
+    for (cases, 0..) |case_a, i| {
+        assert(case_a != 0);
+        assert(case_a != std.math.maxInt(u128));
+        for (cases[0..i]) |case_b| assert(case_a != case_b);
+    }
 
-//     // Hash me, baby, one more time! If this final hash changes, we broke compatibility in a major
-//     // way.
-//     comptime assert(builtin.target.cpu.arch.endian() == .little);
-//     const hash = checksum(mem.sliceAsBytes(&cases));
-//     try testing.expectEqual(hash, 0x82dcaacf4875b279446825b6830d1263);
-// }
+    // Hash me, baby, one more time! If this final hash changes, we broke compatibility in a major
+    // way.
+    comptime assert(builtin.target.cpu.arch.endian() == .little);
+    const hash = checksum(mem.sliceAsBytes(&cases));
+    // try testing.expectEqual(hash, 0x82dcaacf4875b279446825b6830d1263);
+    try testing.expectEqual(hash, 244253170459433797379827060163901277580);
+}

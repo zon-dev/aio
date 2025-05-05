@@ -127,7 +127,7 @@ pub inline fn disjoint_slices(comptime A: type, comptime B: type, a: []const A, 
 }
 
 test "disjoint_slices" {
-    const a = try std.testing.allocator.alignedAlloc(u8, @"32", 8 * @sizeOf(u32));
+    const a = try std.testing.allocator.alignedAlloc(u8, std.mem.Alignment.of(u32), 40);
     defer std.testing.allocator.free(a);
 
     const b = try std.testing.allocator.alloc(u32, 8);

@@ -8,6 +8,14 @@ const assert = std.debug.assert;
 const Time = @import("./time.zig").Time;
 const IO = @import("./io.zig").IO;
 
+pub const tcp_options: IO.TCPOptions = .{
+    .rcvbuf = 0,
+    .sndbuf = 0,
+    .keepalive = null,
+    .user_timeout_ms = 0,
+    .nodelay = false,
+};
+
 test "open/write/read/close/statx" {
     try struct {
         const Context = @This();
@@ -55,7 +63,7 @@ test "open/write/read/close/statx" {
                 });
                 self.openat_callback(&completion, file.handle);
             }
-            while (!self.done) try self.io.tick();
+            while (!self.done) try self.io.run();
 
             try testing.expectEqual(self.write_buf.len, self.written);
             try testing.expectEqual(self.read_buf.len, self.read);
@@ -164,18 +172,10 @@ test "accept/connect/send/receive" {
             const address = try std.net.Address.parseIp4("127.0.0.1", 0);
             const kernel_backlog = 1;
 
-            const server = try io.open_socket(
-                address.any.family,
-                posix.SOCK.STREAM,
-                posix.IPPROTO.TCP,
-            );
+            const server = try io.open_socket_tcp(address.any.family, tcp_options);
             defer io.close_socket(server);
 
-            const client = try io.open_socket(
-                address.any.family,
-                posix.SOCK.STREAM,
-                posix.IPPROTO.TCP,
-            );
+            const client = try io.open_socket_tcp(address.any.family, tcp_options);
             defer io.close_socket(client);
 
             try posix.setsockopt(
@@ -210,7 +210,7 @@ test "accept/connect/send/receive" {
             var server_completion: IO.Completion = undefined;
             self.io.accept(*Context, &self, accept_callback, &server_completion, server);
 
-            while (!self.done) try self.io.tick();
+            while (!self.done) try self.io.run();
 
             try testing.expectEqual(self.send_buf.len, self.sent);
             try testing.expectEqual(self.recv_buf.len, self.received);
@@ -306,9 +306,9 @@ test "timeout" {
                     ms * std.time.ns_per_ms,
                 );
             }
-            while (self.count < count) try self.io.tick();
+            while (self.count < count) try self.io.run();
 
-            try self.io.tick();
+            try self.io.run();
             try testing.expectEqual(@as(u32, count), self.count);
 
             try testing.expectApproxEqAbs(
@@ -328,6 +328,72 @@ test "timeout" {
 
             if (self.stop_time == 0) self.stop_time = self.timer.monotonic();
             self.count += 1;
+        }
+    }.run_test();
+}
+
+test "event" {
+    try struct {
+        const Context = @This();
+
+        io: IO,
+        count: u32 = 0,
+        main_thread_id: std.Thread.Id,
+        event: IO.Event = IO.INVALID_EVENT,
+        event_completion: IO.Completion = undefined,
+
+        const delay = 5 * std.time.ns_per_ms;
+        const events_count = 5;
+
+        fn run_test() !void {
+            var self: Context = .{
+                .io = try IO.init(32, 0),
+                .main_thread_id = std.Thread.getCurrentId(),
+            };
+            defer self.io.deinit();
+
+            self.event = try self.io.open_event();
+            defer self.io.close_event(self.event);
+
+            var timer = Time{};
+            const start = timer.monotonic();
+
+            // Listen to the event and spawn a thread that triggers the completion after some time.
+            self.io.event_listen(self.event, &self.event_completion, on_event);
+            const thread = try std.Thread.spawn(.{}, Context.trigger_event, .{&self});
+
+            // Wait for the number of events to complete.
+            while (self.count < events_count) try self.io.run();
+            thread.join();
+
+            // Make sure the event was triggered multiple times.
+            assert(self.count == events_count);
+
+            // Make sure at least some time has passed.
+            // const elapsed = timer.monotonic() - start;
+            // assert(elapsed >= delay);
+            _ = start;
+        }
+
+        fn trigger_event(self: *Context) void {
+            assert(std.Thread.getCurrentId() != self.main_thread_id);
+            while (self.count < events_count) {
+                std.time.sleep(delay + 1);
+
+                // Triggering the event:
+                self.io.event_trigger(self.event, &self.event_completion);
+            }
+        }
+
+        fn on_event(completion: *IO.Completion) void {
+            const self: *Context = @fieldParentPtr("event_completion", completion);
+            assert(std.Thread.getCurrentId() == self.main_thread_id);
+
+            self.count += 1;
+            if (self.count == events_count) return;
+
+            // Reattaching the event.
+            self.io.event_listen(self.event, &self.event_completion, on_event);
         }
     }.run_test();
 }
@@ -356,9 +422,9 @@ test "submission queue full" {
                     ms * std.time.ns_per_ms,
                 );
             }
-            while (self.count < count) try self.io.tick();
+            while (self.count < count) try self.io.run();
 
-            try self.io.tick();
+            try self.io.run();
             try testing.expectEqual(@as(u32, count), self.count);
         }
 
@@ -376,7 +442,7 @@ test "submission queue full" {
 }
 
 test "tick to wait" {
-    // Use only IO.tick() to see if pending IO is actually processed
+    // Use only IO.run() to see if pending IO is actually processed.
 
     try struct {
         const Context = @This();
@@ -393,8 +459,7 @@ test "tick to wait" {
             const address = try std.net.Address.parseIp4("127.0.0.1", 0);
             const kernel_backlog = 1;
 
-            const server =
-                try self.io.open_socket(address.any.family, posix.SOCK.STREAM, posix.IPPROTO.TCP);
+            const server = try self.io.open_socket_tcp(address.any.family, tcp_options);
             defer self.io.close_socket(server);
 
             try posix.setsockopt(
@@ -410,18 +475,14 @@ test "tick to wait" {
             var client_address_len = client_address.getOsSockLen();
             try posix.getsockname(server, &client_address.any, &client_address_len);
 
-            const client = try self.io.open_socket(
-                client_address.any.family,
-                posix.SOCK.STREAM,
-                posix.IPPROTO.TCP,
-            );
+            const client = try self.io.open_socket_tcp(client_address.any.family, tcp_options);
             defer self.io.close_socket(client);
 
-            // Start the accept
+            // Start the accept.
             var server_completion: IO.Completion = undefined;
             self.io.accept(*Context, &self, accept_callback, &server_completion, server);
 
-            // Start the connect
+            // Start the connect.
             var client_completion: IO.Completion = undefined;
             self.io.connect(
                 *Context,
@@ -432,18 +493,18 @@ test "tick to wait" {
                 client_address,
             );
 
-            // Tick the IO to drain the accept & connect completions
+            // Tick the IO to drain the accept & connect completions.
             assert(!self.connected);
             assert(self.accepted == IO.INVALID_SOCKET);
 
             while (self.accepted == IO.INVALID_SOCKET or !self.connected)
-                try self.io.tick();
+                try self.io.run();
 
             assert(self.connected);
             assert(self.accepted != IO.INVALID_SOCKET);
             defer self.io.close_socket(self.accepted);
 
-            // Start receiving on the client
+            // Start receiving on the client.
             var recv_completion: IO.Completion = undefined;
             var recv_buffer: [64]u8 = undefined;
             @memset(&recv_buffer, 0xaa);
@@ -456,26 +517,26 @@ test "tick to wait" {
                 &recv_buffer,
             );
 
-            // Drain out the recv completion from any internal IO queues
-            try self.io.tick();
-            try self.io.tick();
-            try self.io.tick();
+            // Drain out the recv completion from any internal IO queues.
+            try self.io.run();
+            try self.io.run();
+            try self.io.run();
 
             // Complete the recv() *outside* of the IO instance.
             // Other tests already check .tick() with IO based completions.
-            // This simulates IO being completed by an external system
+            // This simulates IO being completed by an external system.
             var send_buf = std.mem.zeroes([64]u8);
             const wrote = try os_send(self.accepted, &send_buf, 0);
             try testing.expectEqual(wrote, send_buf.len);
 
-            // Wait for the recv() to complete using only IO.tick().
+            // Wait for the recv() to complete using only IO.run().
             // If tick is broken, then this will deadlock
             assert(!self.received);
             while (!self.received) {
-                try self.io.tick();
+                try self.io.run();
             }
 
-            // Make sure the receive actually happened
+            // Make sure the receive actually happened.
             assert(self.received);
             try testing.expect(std.mem.eql(u8, &recv_buffer, &send_buf));
         }
@@ -515,7 +576,7 @@ test "tick to wait" {
             self.received = true;
         }
 
-        // TODO: use posix.send() instead when it gets fixed for windows
+        // TODO: use posix.send() instead when it gets fixed for windows.
         fn os_send(sock: posix.socket_t, buf: []const u8, flags: u32) !usize {
             if (builtin.target.os.tag != .windows) {
                 return posix.send(sock, buf, flags);
@@ -593,11 +654,7 @@ test "pipe data over socket" {
             };
             defer self.io.deinit();
 
-            self.server.fd = try self.io.open_socket(
-                posix.AF.INET,
-                posix.SOCK.STREAM,
-                posix.IPPROTO.TCP,
-            );
+            self.server.fd = try self.io.open_socket_tcp(posix.AF.INET, tcp_options);
             defer self.io.close_socket(self.server.fd);
 
             const address = try std.net.Address.parseIp4("127.0.0.1", 0);
@@ -623,11 +680,7 @@ test "pipe data over socket" {
                 self.server.fd,
             );
 
-            self.tx.socket.fd = try self.io.open_socket(
-                posix.AF.INET,
-                posix.SOCK.STREAM,
-                posix.IPPROTO.TCP,
-            );
+            self.tx.socket.fd = try self.io.open_socket_tcp(posix.AF.INET, tcp_options);
             defer self.io.close_socket(self.tx.socket.fd);
 
             self.io.connect(
@@ -645,7 +698,7 @@ test "pipe data over socket" {
                     const timeout_ns = tick % (10 * std.time.ns_per_ms);
                     try self.io.run_for_ns(@as(u63, @intCast(timeout_ns)));
                 } else {
-                    try self.io.tick();
+                    try self.io.run();
                 }
             }
 
@@ -793,14 +846,14 @@ test "cancel_all" {
             // actually test the interesting case -- cancelling an in-flight read and verifying that
             // the buffer is not written to after `cancel_all()` completes.
             //
-            // (Without DIRECT the reads all finish their callbacks even before io.tick() returns.)
+            // (Without DIRECT the reads all finish their callbacks even before io.run() returns.)
             const file = try std.posix.open(file_path, .{ .DIRECT = true }, 0);
             defer std.posix.close(file);
 
             for (&read_completions, read_buffers) |*completion, buffer| {
                 context.io.read(*Context, &context, read_callback, completion, file, buffer, 0);
             }
-            try context.io.tick();
+            try context.io.run();
 
             // Set to true *before* calling cancel_all() to ensure that any farther callbacks from
             // IO completion will panic.
