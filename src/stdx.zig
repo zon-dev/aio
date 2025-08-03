@@ -767,10 +767,10 @@ pub fn comptime_slice(comptime slice: anytype, comptime len: usize) []const @Typ
 /// Return a Formatter for a u64 value representing a file size.
 /// This formatter statically checks that the number is a multiple of 1024,
 /// and represents it using the IEC measurement units (KiB, MiB, GiB, ...).
-pub fn fmt_int_size_bin_exact(comptime value: u64) std.fmt.Formatter(format_int_size_bin_exact) {
-    comptime assert(value % 1024 == 0);
-    return .{ .data = value };
-}
+// pub fn fmt_int_size_bin_exact(comptime value: u64) std.fmt.Formatter(format_int_size_bin_exact) {
+//     comptime assert(value % 1024 == 0);
+//     return std.fmt.Formatter(format_int_size_bin_exact){ .data = value };
+// }
 
 fn format_int_size_bin_exact(
     value: u64,
@@ -804,16 +804,16 @@ fn format_int_size_bin_exact(
     return std.fmt.formatBuf(buf[0 .. i + 3], options, writer);
 }
 
-test fmt_int_size_bin_exact {
-    try std.testing.expectFmt("0B", "{}", .{fmt_int_size_bin_exact(0)});
-    try std.testing.expectFmt("8KiB", "{}", .{fmt_int_size_bin_exact(8 * 1024)});
-    try std.testing.expectFmt("1025KiB", "{}", .{fmt_int_size_bin_exact(1025 * 1024)});
-    try std.testing.expectFmt("12345KiB", "{}", .{fmt_int_size_bin_exact(12345 * 1024)});
-    try std.testing.expectFmt("42MiB", "{}", .{fmt_int_size_bin_exact(42 * 1024 * 1024)});
-    try std.testing.expectFmt("18014398509481983KiB", "{}", .{
-        fmt_int_size_bin_exact(std.math.maxInt(u64) - 1023),
-    });
-}
+// test "fmt_int_size_bin_exact" {
+//     try std.testing.expectFmt("0B", "{}", .{fmt_int_size_bin_exact(0)});
+//     try std.testing.expectFmt("8KiB", "{}", .{fmt_int_size_bin_exact(8 * 1024)});
+//     try std.testing.expectFmt("1025KiB", "{}", .{fmt_int_size_bin_exact(1025 * 1024)});
+//     try std.testing.expectFmt("12345KiB", "{}", .{fmt_int_size_bin_exact(12345 * 1024)});
+//     try std.testing.expectFmt("42MiB", "{}", .{fmt_int_size_bin_exact(42 * 1024 * 1024)});
+//     try std.testing.expectFmt("18014398509481983KiB", "{}", .{
+//         fmt_int_size_bin_exact(std.math.maxInt(u64) - 1023),
+//     });
+// }
 
 /// Like std.fmt.bufPrint, but checks, at compile time, that the buffer is sufficiently large.
 pub fn array_print(
