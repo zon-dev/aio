@@ -686,7 +686,7 @@ test "has_unique_representation" {
 
     const TestUnion1 = packed union {
         a: u32,
-        b: u16,
+        b: u32,
     };
 
     try std.testing.expect(!has_unique_representation(TestUnion1));
