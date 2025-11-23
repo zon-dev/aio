@@ -3,6 +3,8 @@ const os = std.os;
 const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 const constants = @import("../constants.zig");
+const common = @import("./common.zig");
+const Address = std.Io.net.IpAddress;
 
 const QueueType = @import("../queue.zig").QueueType;
 const Time = @import("../time.zig").Time;
@@ -199,11 +201,11 @@ pub const IO = struct {
                 overlapped: Overlapped,
                 listen_socket: std.posix.socket_t,
                 client_socket: std.posix.socket_t,
-                addr_buffer: [(@sizeOf(std.net.Address) + 16) * 2]u8 align(4),
+                addr_buffer: [(@sizeOf(Address) + 16) * 2]u8 align(4),
             },
             connect: struct {
                 socket: std.posix.socket_t,
-                address: std.net.Address,
+                address: Address,
                 overlapped: Overlapped,
                 pending: bool,
             },
@@ -346,8 +348,8 @@ pub const IO = struct {
                                 op.client_socket,
                                 &op.addr_buffer,
                                 0,
-                                @sizeOf(std.net.Address) + 16,
-                                @sizeOf(std.net.Address) + 16,
+                                @sizeOf(Address) + 16,
+                                @sizeOf(Address) + 16,
                                 &sync_bytes_read,
                                 &op.overlapped.raw,
                             );
@@ -424,7 +426,7 @@ pub const IO = struct {
         ) void,
         completion: *Completion,
         socket: std.posix.socket_t,
-        address: std.net.Address,
+        address: Address,
     ) void {
         self.submit(
             context,
@@ -456,7 +458,7 @@ pub const IO = struct {
 
                         // ConnectEx requires the socket to be initially bound (INADDR_ANY)
                         const inaddr_any = std.mem.zeroes([4]u8);
-                        const bind_addr = std.net.Address.initIp4(inaddr_any, 0);
+                        const bind_addr = Address.initIp4(inaddr_any, 0);
                         std.posix.bind(
                             op.socket,
                             &bind_addr.any,

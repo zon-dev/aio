@@ -7,6 +7,7 @@ const log = std.log.scoped(.io);
 const stdx = @import("../stdx.zig");
 const constants = @import("../constants.zig");
 const common = @import("./common.zig");
+const Address = std.Io.net.IpAddress;
 const QueueType = @import("../queue.zig").QueueType;
 const Time = @import("../time.zig").Time;
 const buffer_limit = @import("../io.zig").buffer_limit;
@@ -201,7 +202,7 @@ pub const IO = struct {
         },
         connect: struct {
             socket: socket_t,
-            address: std.net.Address,
+            address: Address,
             initiated: bool,
         },
         fsync: struct {
@@ -398,7 +399,7 @@ pub const IO = struct {
         ) void,
         completion: *Completion,
         socket: socket_t,
-        address: std.net.Address,
+        address: Address,
     ) void {
         self.submit(
             context,
@@ -818,9 +819,9 @@ pub const IO = struct {
     pub fn listen(
         _: *IO,
         fd: socket_t,
-        address: std.net.Address,
+        address: Address,
         options: common.ListenOptions,
-    ) !std.net.Address {
+    ) !Address {
         return common.listen(fd, address, options);
     }
 

@@ -7,6 +7,8 @@ const assert = std.debug.assert;
 
 const is_linux = builtin.target.os.tag == .linux;
 
+pub const Address = std.Io.net.IpAddress;
+
 pub const TCPOptions = struct {
     rcvbuf: c_int,
     sndbuf: c_int,
@@ -25,15 +27,15 @@ pub const ListenOptions = struct {
 
 pub fn listen(
     fd: posix.socket_t,
-    address: std.net.Address,
+    address: Address,
     options: ListenOptions,
-) !std.net.Address {
+) !Address {
     try setsockopt(fd, posix.SOL.SOCKET, posix.SO.REUSEADDR, 1);
     try posix.bind(fd, &address.any, address.getOsSockLen());
 
     // Resolve port 0 to an actual port picked by the OS.
-    var address_resolved: std.net.Address = .{ .any = undefined };
-    var addrlen: posix.socklen_t = @sizeOf(std.net.Address);
+    var address_resolved: Address = undefined;
+    var addrlen: posix.socklen_t = @sizeOf(Address);
     try posix.getsockname(fd, &address_resolved.any, &addrlen);
     assert(address_resolved.getOsSockLen() == addrlen);
     assert(address_resolved.any.family == address.any.family);
