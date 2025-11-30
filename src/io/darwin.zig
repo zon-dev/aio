@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const posix = std.posix;
 const mem = std.mem;
 const assert = std.debug.assert;
@@ -315,12 +316,32 @@ pub const IO = struct {
             },
             struct {
                 fn do_operation(op: anytype) AcceptError!socket_t {
-                    const fd = try posix.accept(
-                        op.socket,
-                        null,
-                        null,
-                        posix.SOCK.NONBLOCK | posix.SOCK.CLOEXEC,
-                    );
+                    // Use std.Io.net.Server.accept which has compatible error types
+                    // For now, we'll use posix.accept and handle errors manually
+                    const rc = if (builtin.target.os.tag.isDarwin() or builtin.target.os.tag == .haiku)
+                        posix.system.accept(op.socket, null, null)
+                    else
+                        posix.system.accept4(op.socket, null, null, posix.SOCK.NONBLOCK | posix.SOCK.CLOEXEC);
+
+                    const fd = if (rc < 0) switch (posix.errno(rc)) {
+                        .SUCCESS => unreachable,
+                        .INTR => return do_operation(op), // Retry on interrupt
+                        .AGAIN => return error.WouldBlock,
+                        .BADF => unreachable,
+                        .CONNABORTED => return error.ConnectionAborted,
+                        .FAULT => unreachable,
+                        .INVAL => return error.Unexpected, // SocketNotListening mapped to Unexpected
+                        .NOTSOCK => unreachable,
+                        .MFILE => return error.ProcessFdQuotaExceeded,
+                        .NFILE => return error.SystemFdQuotaExceeded,
+                        .NOBUFS => return error.SystemResources,
+                        .NOMEM => return error.SystemResources,
+                        .OPNOTSUPP => unreachable,
+                        .PROTO => return error.ProtocolFailure,
+                        .PERM => return error.BlockedByFirewall,
+                        else => |e| return posix.unexpectedErrno(e),
+                    } else @as(posix.socket_t, @intCast(rc));
+
                     errdefer posix.close(fd);
 
                     // Darwin doesn't support posix.MSG_NOSIGNAL to avoid getting SIGPIPE on
@@ -333,8 +354,8 @@ pub const IO = struct {
                         &mem.toBytes(@as(c_int, 1)),
                     ) catch |err| return switch (err) {
                         error.TimeoutTooBig => unreachable,
-                        error.PermissionDenied => error.NetworkSubsystemFailed,
-                        error.AlreadyConnected => error.NetworkSubsystemFailed,
+                        error.PermissionDenied => error.SystemResources,
+                        error.AlreadyConnected => error.SystemResources,
                         error.InvalidProtocolOption => error.ProtocolFailure,
                         else => |e| e,
                     };
