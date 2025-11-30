@@ -114,6 +114,13 @@ const QueueAny = struct {
 
     pub fn pop(self: *QueueAny) ?*QueueLink {
         const result = self.out orelse return null;
+        // 防御性检查：如果 count 已经是 0，说明队列状态不一致
+        // 这种情况下，我们重置队列状态并返回 null，避免整数下溢
+        if (self.count == 0) {
+            self.out = null;
+            self.in = null;
+            return null;
+        }
         self.out = result.next;
         result.next = null;
         if (self.in == result) self.in = null;
@@ -142,6 +149,10 @@ const QueueAny = struct {
     }
 
     pub fn remove(self: *QueueAny, to_remove: *QueueLink) void {
+        // 防御性检查：如果 count 为 0，队列为空，无法移除元素
+        if (self.count == 0) {
+            return;
+        }
         if (to_remove == self.out) {
             _ = self.pop();
             return;
@@ -152,7 +163,10 @@ const QueueAny = struct {
                 if (to_remove == self.in) self.in = link;
                 link.next = to_remove.next;
                 to_remove.next = null;
-                self.count -= 1;
+                // 防御性检查：确保 count > 0 再递减
+                if (self.count > 0) {
+                    self.count -= 1;
+                }
                 break;
             }
         } else unreachable;
@@ -251,6 +265,147 @@ test "Queue: push/pop/peek/remove/empty" {
     try testing.expectEqual(@as(?*Item, &one), fifo.pop());
     try testing.expectEqual(@as(?*Item, &three), fifo.pop());
     try testing.expectEqual(@as(?*Item, null), fifo.pop());
+    try testing.expect(fifo.empty());
+}
+
+test "Queue: integer overflow protection - empty queue pop" {
+    const testing = @import("std").testing;
+
+    const Item = struct { link: QueueType(@This()).Link = .{} };
+
+    var fifo = QueueType(Item).init(.{
+        .name = null,
+        .verify_push = true,
+    });
+
+    // 测试空队列时多次 pop() 不会导致整数下溢
+    try testing.expect(fifo.empty());
+    try testing.expectEqual(@as(?*Item, null), fifo.pop());
+    try testing.expectEqual(@as(?*Item, null), fifo.pop());
+    try testing.expectEqual(@as(?*Item, null), fifo.pop());
+    try testing.expect(fifo.empty());
+    try testing.expectEqual(@as(u64, 0), fifo.count());
+}
+
+test "Queue: integer overflow protection - empty queue remove" {
+    const testing = @import("std").testing;
+
+    const Item = struct { link: QueueType(@This()).Link = .{} };
+
+    var one: Item = .{};
+    var fifo = QueueType(Item).init(.{
+        .name = null,
+        .verify_push = true,
+    });
+
+    // 测试空队列时 remove() 不会导致整数下溢
+    try testing.expect(fifo.empty());
+    fifo.remove(&one); // 应该安全地返回，不崩溃
+    try testing.expect(fifo.empty());
+    try testing.expectEqual(@as(u64, 0), fifo.count());
+}
+
+test "Queue: integer overflow protection - count consistency after multiple pops" {
+    const testing = @import("std").testing;
+
+    const Item = struct { link: QueueType(@This()).Link = .{} };
+
+    var one: Item = .{};
+    var two: Item = .{};
+    var fifo = QueueType(Item).init(.{
+        .name = null,
+        .verify_push = true,
+    });
+
+    // 添加元素
+    fifo.push(&one);
+    fifo.push(&two);
+    try testing.expectEqual(@as(u64, 2), fifo.count());
+    try testing.expect(!fifo.empty());
+
+    // 弹出所有元素
+    _ = fifo.pop();
+    try testing.expectEqual(@as(u64, 1), fifo.count());
+    _ = fifo.pop();
+    try testing.expectEqual(@as(u64, 0), fifo.count());
+    try testing.expect(fifo.empty());
+
+    // 继续弹出应该安全，不会导致整数下溢
+    try testing.expectEqual(@as(?*Item, null), fifo.pop());
+    try testing.expectEqual(@as(u64, 0), fifo.count());
+    try testing.expectEqual(@as(?*Item, null), fifo.pop());
+    try testing.expectEqual(@as(u64, 0), fifo.count());
+    try testing.expect(fifo.empty());
+}
+
+test "Queue: integer overflow protection - remove from empty queue" {
+    const testing = @import("std").testing;
+
+    const Item = struct { link: QueueType(@This()).Link = .{} };
+
+    var one: Item = .{};
+    var two: Item = .{};
+    var three: Item = .{};
+    var fifo = QueueType(Item).init(.{
+        .name = null,
+        .verify_push = true,
+    });
+
+    // 添加并移除元素
+    fifo.push(&one);
+    fifo.push(&two);
+    fifo.push(&three);
+    try testing.expectEqual(@as(u64, 3), fifo.count());
+
+    fifo.remove(&one);
+    try testing.expectEqual(@as(u64, 2), fifo.count());
+    fifo.remove(&two);
+    try testing.expectEqual(@as(u64, 1), fifo.count());
+    fifo.remove(&three);
+    try testing.expectEqual(@as(u64, 0), fifo.count());
+    try testing.expect(fifo.empty());
+
+    // 从空队列移除应该安全，不会导致整数下溢
+    fifo.remove(&one);
+    try testing.expectEqual(@as(u64, 0), fifo.count());
+    fifo.remove(&two);
+    try testing.expectEqual(@as(u64, 0), fifo.count());
+    try testing.expect(fifo.empty());
+}
+
+test "Queue: normal functionality after overflow protection" {
+    const testing = @import("std").testing;
+
+    const Item = struct { link: QueueType(@This()).Link = .{} };
+
+    var one: Item = .{};
+    var two: Item = .{};
+    var three: Item = .{};
+    var fifo = QueueType(Item).init(.{
+        .name = null,
+        .verify_push = true,
+    });
+
+    // 先测试空队列操作（触发防御性代码路径）
+    try testing.expectEqual(@as(?*Item, null), fifo.pop());
+    fifo.remove(&one);
+
+    // 然后验证正常功能仍然工作
+    fifo.push(&one);
+    try testing.expectEqual(@as(u64, 1), fifo.count());
+    try testing.expect(!fifo.empty());
+    try testing.expect(fifo.contains(&one));
+
+    fifo.push(&two);
+    fifo.push(&three);
+    try testing.expectEqual(@as(u64, 3), fifo.count());
+
+    try testing.expectEqual(@as(?*Item, &one), fifo.pop());
+    try testing.expectEqual(@as(u64, 2), fifo.count());
+    try testing.expectEqual(@as(?*Item, &two), fifo.pop());
+    try testing.expectEqual(@as(u64, 1), fifo.count());
+    try testing.expectEqual(@as(?*Item, &three), fifo.pop());
+    try testing.expectEqual(@as(u64, 0), fifo.count());
     try testing.expect(fifo.empty());
 }
 
