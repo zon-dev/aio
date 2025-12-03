@@ -21,6 +21,9 @@ pub fn QueueType(comptime T: type) type {
             verify_push: bool = true,
         }) Queue {
             return .{ .any = .{
+                .in = null,
+                .out = null,
+                .count = 0,
                 .name = options.name,
                 .verify_push = options.verify_push,
             } };

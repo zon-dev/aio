@@ -31,7 +31,16 @@ pub const IO = struct {
 
         const kq = try posix.kqueue();
         assert(kq > -1);
-        return IO{ .kq = kq };
+        // 显式初始化所有字段，确保队列被正确初始化
+        return IO{
+            .kq = kq,
+            .event_id = 0,
+            .time = .{},
+            .io_inflight = 0,
+            .timeouts = QueueType(Completion).init(.{ .name = "io_timeouts" }),
+            .completed = QueueType(Completion).init(.{ .name = "io_completed" }),
+            .io_pending = QueueType(Completion).init(.{ .name = "io_pending" }),
+        };
     }
 
     pub fn deinit(self: *IO) void {
@@ -105,6 +114,11 @@ pub const IO = struct {
                     ts.sec = @as(@TypeOf(ts.sec), @intCast(timeout_ns / std.time.ns_per_s));
                 } else if (self.io_inflight == 0) {
                     return;
+                } else {
+                    // 有进行中的 I/O 但没有新事件要提交，进行短暂阻塞等待以避免忙等待
+                    // 等待 1ms，这样可以在有事件时快速响应，同时避免 CPU 100% 使用率
+                    ts.nsec = std.time.ns_per_ms % std.time.ns_per_s;
+                    ts.sec = std.time.ns_per_ms / std.time.ns_per_s;
                 }
             }
 
