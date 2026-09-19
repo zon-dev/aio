@@ -2,6 +2,40 @@ const std = @import("std");
 const IO = @import("../aio.zig").IO;
 const Time = @import("../aio.zig").Time;
 
+// Wrappers for removed posix functions needed by the test
+fn bind(sockfd: std.posix.socket_t, addr: *const std.posix.sockaddr, len: std.posix.socklen_t) !void {
+    const rc = std.posix.system.bind(sockfd, addr, len);
+    if (rc == 0) return;
+    return switch (std.posix.errno(rc)) {
+        .ACCES, .PERM => error.AccessDenied,
+        .ADDRINUSE => error.AddressInUse,
+        .BADF => unreachable,
+        .INVAL => unreachable,
+        .NOTSOCK => unreachable,
+        .ADDRNOTAVAIL => error.AddressNotAvailable,
+        .FAULT => unreachable,
+        .LOOP => error.SymLinkLoop,
+        .NAMETOOLONG => error.NameTooLong,
+        .NOENT => error.FileNotFound,
+        .NOMEM => error.SystemResources,
+        .NOTDIR => error.NotDir,
+        .ROFS => error.ReadOnlyFileSystem,
+        else => |err| std.posix.unexpectedErrno(err),
+    };
+}
+
+fn listen(sockfd: std.posix.socket_t, backlog: u31) !void {
+    const rc = std.posix.system.listen(sockfd, backlog);
+    if (rc == 0) return;
+    return switch (std.posix.errno(rc)) {
+        .ADDRINUSE => error.AddressInUse,
+        .BADF => unreachable,
+        .NOTSOCK => error.FileDescriptorNotASocket,
+        .OPNOTSUPP => error.OperationNotSupported,
+        else => |err| std.posix.unexpectedErrno(err),
+    };
+}
+
 test "basic IO initialization" {
     const testing = std.testing;
 
@@ -56,8 +90,8 @@ test "accept function updated for Darwin" {
     addr_bytes[7] = 0;
 
     try posix.setsockopt(socket, posix.SOL.SOCKET, posix.SO.REUSEADDR, &std.mem.toBytes(@as(c_int, 1)));
-    try posix.bind(socket, &addr, @sizeOf(posix.sockaddr));
-    try posix.listen(socket, 1);
+    try bind(socket, &addr, @sizeOf(posix.sockaddr));
+    try listen(socket, 1);
 
     // Test that accept can be called - this verifies the updated accept implementation
     // The update specifically uses posix.system.accept() for Darwin instead of accept4()

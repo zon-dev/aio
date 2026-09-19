@@ -2,6 +2,24 @@ const std = @import("std");
 const IO = @import("../aio.zig").IO;
 const Time = @import("../aio.zig").Time;
 
+/// `std.time.Timer` was removed from the standard library. This shim keeps the same
+/// `start()`/`read()` shape used by the benchmarks below, backed by this project's
+/// own monotonic clock, which already returns nanoseconds.
+const Timer = struct {
+    time: Time = .{},
+    started: u64,
+
+    fn start() error{}!Timer {
+        var time = Time{};
+        return .{ .time = time, .started = time.monotonic() };
+    }
+
+    /// Nanoseconds elapsed since `start()`.
+    fn read(self: *Timer) u64 {
+        return self.time.monotonic() - self.started;
+    }
+};
+
 // Benchmark 辅助函数：预热循环，让 CPU 缓存和分支预测器预热
 fn warmup(comptime iterations: comptime_int) void {
     var dummy: u64 = 0;
@@ -26,7 +44,7 @@ const BenchmarkStats = struct {
         }
 
         // 分配排序数组
-        var sorted = std.testing.allocator.alloc(u64, times.len) catch unreachable;
+        const sorted = std.testing.allocator.alloc(u64, times.len) catch unreachable;
         defer std.testing.allocator.free(sorted);
         @memcpy(sorted, times);
         std.mem.sort(u64, sorted, {}, comptime std.sort.asc(u64));
@@ -61,7 +79,7 @@ test "benchmark: IO.init/deinit performance" {
     // 参考 libuv 的 benchmark 实践：预热 + 多次测量 + 统计分析
     const warmup_iterations = 10;
     const iterations = 1000;
-    var timer = try std.time.Timer.start();
+    var timer = try Timer.start();
 
     // 预热：让 CPU 缓存和分支预测器预热
     warmup(1000);
@@ -98,7 +116,7 @@ test "benchmark: Time.monotonic() performance" {
     // libuv 级别的性能：应该 < 50ns 每次调用（在 Darwin 上使用 mach_continuous_time）
     const warmup_iterations = 1000;
     const iterations = 1_000_000; // 增加迭代次数以获得更精确的测量
-    var timer = try std.time.Timer.start();
+    var timer = try Timer.start();
     var time = Time{};
 
     // 预热：让 CPU 缓存和分支预测器预热
@@ -138,7 +156,7 @@ test "benchmark: IO.run() overhead performance" {
         io.run() catch {};
     }
 
-    var timer = try std.time.Timer.start();
+    var timer = try Timer.start();
     var times = try std.testing.allocator.alloc(u64, iterations);
     defer std.testing.allocator.free(times);
 
@@ -197,7 +215,7 @@ test "benchmark: IO.timeout() performance" {
         io.run() catch {};
     }
 
-    var timer = try std.time.Timer.start();
+    var timer = try Timer.start();
     var times = try std.testing.allocator.alloc(u64, iterations);
     defer std.testing.allocator.free(times);
 
@@ -263,7 +281,7 @@ test "benchmark: multiple timeout operations performance" {
         }
     }
 
-    var timer = try std.time.Timer.start();
+    var timer = try Timer.start();
     var times = try std.testing.allocator.alloc(u64, batches);
     defer std.testing.allocator.free(times);
 
@@ -343,7 +361,7 @@ test "benchmark: throughput - 10k requests per second" {
         io.run() catch {};
     }
 
-    var timer = try std.time.Timer.start();
+    var timer = try Timer.start();
     const start_time = timer.read();
 
     // 批量提交和处理请求，模拟高吞吐量场景

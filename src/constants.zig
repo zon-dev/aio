@@ -27,7 +27,7 @@ pub const log = std.log.defaultLog;
 /// A log function that discards all log entries.
 pub fn log_nop(
     comptime message_level: std.log.Level,
-    comptime scope: @Type(.EnumLiteral),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {

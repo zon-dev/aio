@@ -37,7 +37,9 @@ const Connection = struct {
     // 连接池链表指针
     pool_next: ?*Connection = null,
     // 连接池引用（用于释放）
-    pool: *ConnectionPool,
+    pool: *ConnectionPool = undefined,
+    // 分配器字段（用于非连接池模式）
+    allocator: std.mem.Allocator = undefined,
 
     const State = enum {
         reading,
@@ -73,6 +75,10 @@ const Connection = struct {
     fn destroy(self: *Connection) void {
         if (self.in_use) {
             self.pool.release(self);
+        } else {
+            // 非连接池模式：直接关闭并释放
+            self.deinit();
+            self.allocator.destroy(self);
         }
     }
 };
@@ -371,22 +377,30 @@ fn on_accept(
     };
 
     // 初始化 Connection，确保所有字段都被正确初始化
-    conn.io = context.io;
-    conn.socket = client_socket;
-    conn.state = .reading;
-    conn.allocator = global_allocator; // 存储分配器，用于后续释放
-    // Completion 的 link 字段需要显式初始化为空
-    conn.read_completion = .{
-        .link = .{},
-        .context = null,
-        .callback = undefined,
-        .operation = undefined,
-    };
-    conn.send_completion = .{
-        .link = .{},
-        .context = null,
-        .callback = undefined,
-        .operation = undefined,
+    conn.* = .{
+        .io = context.io,
+        .socket = client_socket,
+        .read_buffer = undefined,
+        .read_completion = .{
+            .link = .{},
+            .context = null,
+            .callback = undefined,
+            .operation = undefined,
+        },
+        .send_completion = .{
+            .link = .{},
+            .context = null,
+            .callback = undefined,
+            .operation = undefined,
+        },
+        .state = .reading,
+        .closed = false,
+        .in_use = false,
+        .read_context = undefined,
+        .send_context = undefined,
+        .pool_next = null,
+        .pool = undefined,
+        .allocator = global_allocator,
     };
 
     // 开始读取请求

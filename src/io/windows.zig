@@ -4,7 +4,7 @@ const assert = std.debug.assert;
 const log = std.log.scoped(.io);
 const constants = @import("../constants.zig");
 const common = @import("./common.zig");
-const Address = std.Io.net.IpAddress;
+const Address = std.net.Address;
 
 const QueueType = @import("../queue.zig").QueueType;
 const Time = @import("../time.zig").Time;
@@ -378,16 +378,7 @@ pub const IO = struct {
                         return op.client_socket;
                     }
 
-                    // destroy the client_socket we created if we get a non WouldBlock error
-                    errdefer |err| switch (err) {
-                        error.WouldBlock => {},
-                        else => {
-                            ctx.io.close_socket(op.client_socket);
-                            op.client_socket = INVALID_SOCKET;
-                        },
-                    };
-
-                    return switch (os.windows.ws2_32.WSAGetLastError()) {
+                    const accept_result = switch (os.windows.ws2_32.WSAGetLastError()) {
                         .WSA_IO_PENDING, .WSAEWOULDBLOCK, .WSA_IO_INCOMPLETE => error.WouldBlock,
                         .WSANOTINITIALISED => unreachable, // WSAStartup() was called
                         .WSAENETDOWN => unreachable, // WinSock error
@@ -401,6 +392,17 @@ pub const IO = struct {
                         .WSAEINTR, .WSAEINPROGRESS => unreachable, // no blocking calls
                         else => |err| os.windows.unexpectedWSAError(err),
                     };
+
+                    // destroy the client_socket we created if we get a non WouldBlock error
+                    _ = accept_result catch |err| switch (err) {
+                        error.WouldBlock => {},
+                        else => {
+                            ctx.io.close_socket(op.client_socket);
+                            op.client_socket = INVALID_SOCKET;
+                        },
+                    };
+
+                    return accept_result;
                 }
             },
         );
@@ -1120,7 +1122,7 @@ pub const IO = struct {
 
                 // const sector_size = constants.sector_size;
                 const sector_size = constants.sector_size;
-                const sector: [sector_size]u8 align(sector_size) = [_]u8{0} ** sector_size;
+                const sector: [sector_size]u8 align(sector_size) = @splat(0);
 
                 // Handle partial writes where the physical sector is less than a logical sector:
                 const write_offset = size - sector.len;

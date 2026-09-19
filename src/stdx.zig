@@ -227,7 +227,10 @@ const TimeIt = struct {
 
     /// Prints elapsed time to stderr and resets the internal timer.
     pub fn lap(self: *TimeIt, comptime label: []const u8) void {
-        const label_alignment = comptime " " ** (1 + (12 -| label.len));
+        const label_alignment = comptime blk: {
+            const pad: [1 + (12 -| label.len)]u8 = @splat(' ');
+            break :blk pad;
+        };
 
         const nanos = self.inner.lap();
         std.debug.print(
@@ -253,7 +256,7 @@ pub const log = if (builtin.is_test)
     // Downgrade `err` to `warn` for tests.
     // Zig fails any test that does `log.err`, but we want to test those code paths here.
     struct {
-        pub fn scoped(comptime scope: @Type(.enum_literal)) type {
+        pub fn scoped(comptime scope: @EnumLiteral()) type {
             const base = std.log.scoped(scope);
             return struct {
                 pub const err = warn;
@@ -306,8 +309,8 @@ fn has_pointers(comptime T: type) bool {
 
         .Array => |info| return comptime has_pointers(info.child),
         .Struct => |info| {
-            inline for (info.fields) |field| {
-                if (comptime has_pointers(field.type)) return true;
+            inline for (info.field_types) |field_type| {
+                if (comptime has_pointers(field_type)) return true;
             }
             return false;
         },
@@ -324,20 +327,20 @@ pub fn no_padding(comptime T: type) bool {
             switch (info.layout) {
                 .auto => return false,
                 .@"extern" => {
-                    for (info.fields) |field| {
-                        if (!no_padding(field.type)) return false;
+                    for (info.field_types) |field_type| {
+                        if (!no_padding(field_type)) return false;
                     }
 
                     // Check offsets of u128 and pseudo-u256 fields.
-                    for (info.fields) |field| {
-                        if (field.type == u128) {
-                            const offset = @offsetOf(T, field.name);
+                    for (info.field_names, info.field_types) |field_name, field_type| {
+                        if (field_type == u128) {
+                            const offset = @offsetOf(T, field_name);
                             if (offset % @sizeOf(u128) != 0) return false;
 
-                            if (@hasField(T, field.name ++ "_padding")) {
+                            if (@hasField(T, field_name ++ "_padding")) {
                                 if (offset % @sizeOf(u256) != 0) return false;
                                 if (offset + @sizeOf(u128) !=
-                                    @offsetOf(T, field.name ++ "_padding"))
+                                    @offsetOf(T, field_name ++ "_padding"))
                                 {
                                     return false;
                                 }
@@ -346,10 +349,10 @@ pub fn no_padding(comptime T: type) bool {
                     }
 
                     var offset = 0;
-                    for (info.fields) |field| {
-                        const field_offset = @offsetOf(T, field.name);
+                    for (info.field_names, info.field_types) |field_name, field_type| {
+                        const field_offset = @offsetOf(T, field_name);
                         if (offset != field_offset) return false;
-                        offset += @sizeOf(field.type);
+                        offset += @sizeOf(field_type);
                     }
                     return offset == @sizeOf(T);
                 },
@@ -357,7 +360,6 @@ pub fn no_padding(comptime T: type) bool {
             }
         },
         .@"enum" => |info| {
-            maybe(info.is_exhaustive);
             return no_padding(info.tag_type);
         },
         .pointer => return false,
@@ -604,8 +606,7 @@ pub fn has_unique_representation(comptime T: type) bool {
 
             var sum_size = @as(usize, 0);
 
-            inline for (info.fields) |field| {
-                const FieldType = field.type;
+            inline for (info.field_types) |FieldType| {
                 if (comptime !has_unique_representation(FieldType)) return false;
                 sum_size += @sizeOf(FieldType);
             }
@@ -712,7 +713,7 @@ test "has_unique_representation" {
 
     try std.testing.expect(!has_unique_representation(TestUnion4));
 
-    inline for ([_]type{ i0, u8, i16, u32, i64 }) |T| {
+    inline for ([_]type{ u0, u8, i16, u32, i64 }) |T| {
         try std.testing.expect(has_unique_representation(T));
     }
     inline for ([_]type{ i1, u9, i17, u33, i24 }) |T| {
@@ -739,23 +740,18 @@ pub fn EnumUnionType(
     comptime Enum: type,
     comptime TypeForVariant: fn (comptime variant: Enum) type,
 ) type {
-    const UnionField = std.builtin.Type.UnionField;
+    const variants = std.enums.values(Enum);
 
-    var fields: []const UnionField = &[_]UnionField{};
-    for (std.enums.values(Enum)) |enum_variant| {
-        fields = fields ++ &[_]UnionField{.{
-            .name = @tagName(enum_variant),
-            .type = TypeForVariant(enum_variant),
-            .alignment = @alignOf(TypeForVariant(enum_variant)),
-        }};
+    var field_names: [variants.len][]const u8 = undefined;
+    var field_types: [variants.len]type = undefined;
+    var field_attrs: [variants.len]std.builtin.Type.UnionField.Attributes = undefined;
+    for (variants, &field_names, &field_types, &field_attrs) |variant, *name, *Type, *attrs| {
+        name.* = @tagName(variant);
+        Type.* = TypeForVariant(variant);
+        attrs.* = .{ .@"align" = @alignOf(TypeForVariant(variant)) };
     }
 
-    return @Type(.{ .Union = .{
-        .layout = .auto,
-        .fields = fields,
-        .decls = &.{},
-        .tag_type = Enum,
-    } });
+    return @Union(.auto, Enum, &field_names, &field_types, &field_attrs);
 }
 
 /// Creates a slice to a comptime slice without triggering
