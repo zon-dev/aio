@@ -301,16 +301,16 @@ pub fn equal_bytes(comptime T: type, a: *const T, b: *const T) bool {
 
 fn has_pointers(comptime T: type) bool {
     switch (@typeInfo(T)) {
-        .Pointer => return true,
+        .pointer => return true,
         // Be conservative.
         else => return true,
 
-        .Bool, .Int, .Enum => return false,
+        .bool, .int, .@"enum" => return false,
 
-        .Array => |info| return comptime has_pointers(info.child),
-        .Struct => |info| {
-            inline for (info.field_types) |field_type| {
-                if (comptime has_pointers(field_type)) return true;
+        .array => |info| return comptime has_pointers(info.child),
+        .@"struct" => |info| {
+            inline for (info.fields) |field| {
+                if (comptime has_pointers(field.type)) return true;
             }
             return false;
         },
@@ -327,13 +327,14 @@ pub fn no_padding(comptime T: type) bool {
             switch (info.layout) {
                 .auto => return false,
                 .@"extern" => {
-                    for (info.field_types) |field_type| {
-                        if (!no_padding(field_type)) return false;
+                    for (info.fields) |field| {
+                        if (!no_padding(field.type)) return false;
                     }
 
                     // Check offsets of u128 and pseudo-u256 fields.
-                    for (info.field_names, info.field_types) |field_name, field_type| {
-                        if (field_type == u128) {
+                    for (info.fields) |field| {
+                        const field_name = field.name;
+                        if (field.type == u128) {
                             const offset = @offsetOf(T, field_name);
                             if (offset % @sizeOf(u128) != 0) return false;
 
@@ -349,10 +350,10 @@ pub fn no_padding(comptime T: type) bool {
                     }
 
                     var offset = 0;
-                    for (info.field_names, info.field_types) |field_name, field_type| {
-                        const field_offset = @offsetOf(T, field_name);
+                    for (info.fields) |field| {
+                        const field_offset = @offsetOf(T, field.name);
                         if (offset != field_offset) return false;
-                        offset += @sizeOf(field_type);
+                        offset += @sizeOf(field.type);
                     }
                     return offset == @sizeOf(T);
                 },
@@ -606,9 +607,9 @@ pub fn has_unique_representation(comptime T: type) bool {
 
             var sum_size = @as(usize, 0);
 
-            inline for (info.field_types) |FieldType| {
-                if (comptime !has_unique_representation(FieldType)) return false;
-                sum_size += @sizeOf(FieldType);
+            inline for (info.fields) |field| {
+                if (comptime !has_unique_representation(field.type)) return false;
+                sum_size += @sizeOf(field.type);
             }
 
             return @sizeOf(T) == sum_size;
